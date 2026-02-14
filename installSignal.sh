@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Last updated 14 February 2026
+
 ############################################
 ############################################
 # Use this part as the conditional script in Addigy
