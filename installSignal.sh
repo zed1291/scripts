@@ -1,7 +1,5 @@
 #!/bin/bash
 
-# Last updated 14 February 2026
-
 ############################################
 ############################################
 # Use this part as the conditional script in Addigy
@@ -13,7 +11,7 @@ update_only="No"
 
 # Determine the latest version of the app
 RELEASES_URL="https://updates.signal.org/desktop/latest-mac.yml"
-latest_version=$(curl -s "$RELEASES_URL" | grep -o "version: .*" | cut -d " " -f 2)
+latest_version=$(curl -s $RELEASES_URL | grep -o "version: .*" | cut -d " " -f 2)
 installed_version=$(/usr/bin/defaults read "/Applications/$APP_NAME.app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null)
 
 # Check if installed and/or if an update is needed.
@@ -75,12 +73,36 @@ swiftInstalled() {
     if [ ! -f "/usr/local/bin/dialog" ]; then
         echo "Swift Dialog not installed"
         exit 1
+    else
+        echo "Swift Dialog installed"
+    fi
+}
+
+alertHours() {
+    # Check if alerting within the allowed window
+    # Only give notifications if before 10am or after 4pm
+    if [ $(date +%H) -lt 10 ] || [ $(date +%H) -gt 15 ]; then
+        echo "Script is running in allowed alerting hours."
+        return 0
+    else
+        echo "Script is not running in allowed alerting hours."
+        return 1
+    fi
+}
+
+zoom () {
+    if ps aux | grep "zoom.us" | grep -q "aomhost"; then
+        echo "A Zoom call is ongoing, exiting..."
+        return 1
+    else
+        # No Zoom meeting
+        return 0
     fi
 }
 
 popUpWindow() {
     # Download custom icon
-    ICON_URL="urlGoesHere"
+    ICON_URL="https://personified.tech/wp-content/themes/personified/images/favicons/apple-touch-icon.png"
     ICON_PATH="/tmp/Update_icon.png"
     curl -s -L -o "$ICON_PATH" "$ICON_URL"
 
@@ -101,23 +123,21 @@ popUpWindow() {
         --position bottomright \
         --ontop
     exitCode=$?
-    # Check the exit code - Update Now returns 0, depleted timer returns 4,
-    # Later returns 2
+    # Check the exit code - Update Now returns returns 0, depleted timer returns 4
+    # Later returns 2.
 
+    if [[ -f "$ICON_PATH" ]]; then rm "$ICON_PATH"; fi
     if [[ "$exitCode" == "0" ]]; then
         echo "User clicked 'Update Now', continuing with $APP_NAME update."
         if pgrep -xq "$APP_NAME"; then killall "$APP_NAME"; fi
         echo "Continuing with install..."
-        rm "$ICON_PATH"
         sleep 2
     elif [[ "$exitCode" == "4" ]]; then
         # User let the timer run out
         echo "The timer ran out, deferring install."
-        rm "$ICON_PATH"
         exit 0
     else
         echo "$APP_NAME update was deferred."
-        rm "$ICON_PATH"
         exit 0
     fi
 }
@@ -160,8 +180,10 @@ fi
 
 # Check if App is running
 if pgrep -xq "$APP_NAME"; then
+    if ! alertHours; then exit 0; fi # Check to make sure alerting withing the allowed window
+    if ! zoom; then exit 0; fi # Check if Zoom is running
     echo "$APP_NAME is open, asking to install."
-    swiftInstalled
+    if ! swiftInstalled; then exit 0; fi # Check if Swift Dialog is installed
     popUpWindow
     reopen_app="Yes"
 else
