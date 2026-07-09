@@ -1,17 +1,28 @@
 #!/bin/bash
 
+# Save logs to file
+LOG_FILE="/Library/Addigy/.addigy_installs.log"
+
+# If over 1MB, delete the first 512KB of lines
+if [ -f "$LOG_FILE" ] && [ $(wc -c < "$LOG_FILE") -gt 1048576 ]; then
+    tail -c 524288 "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
+fi
+
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 ############################################
 ############################################
 # Use this part as the conditional script in Addigy
 # 'exit 1' = install app
 
 APP_NAME="1Password"
-echo "Starting 'Install $APP_NAME.'"
+echo ""
+echo "Starting 'Install $APP_NAME.' ($(date '+%Y-%m-%d %H:%M:%S'))"
 update_only="No"
 
 # Determine the latest version
-RELEASES_URL="https://releasebot.io/updates/1password/1password-mac"
-latest_version=$(curl -s $RELEASES_URL | grep -o "$APP_NAME for Mac [0-9.*]*" | head -n 1 | awk '{print $4}')
+RELEASES_URL="https://releases.1password.com/mac/stable/"
+latest_version=$(curl -s $RELEASES_URL | grep -o "$APP_NAME for Mac [0-9]\+\.[0-9]\+\([\.][0-9]\+\)\?" | head -n 1 | awk '{print $4}')
 installed_version=$(/usr/bin/defaults read "/Applications/$APP_NAME.app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null)
 
 # Check if installed and/or if an update is needed.
@@ -22,7 +33,7 @@ if [[ ! -d "/Applications/$APP_NAME.app" ]]; then
         exit 0
     fi
     echo "$APP_NAME is not installed. Installing..."
-    exit 1
+    # exit 1
 elif [ -z "$latest_version" ]; then
     # Cannot compare installed version with latest version
     echo "Error: Couldn't determine the latest $APP_NAME version."
@@ -37,7 +48,7 @@ elif [[ "$latest_version" != "$installed_version" ]]; then
         # An update is needed
         echo "Installed version: $installed_version."
         echo "Updating to $latest_version..."
-        exit 1
+        # exit 1
     else
         # $latest_version is LOWER than $installed_version
         echo "Error: the installed version is greater than the latest version."
@@ -51,8 +62,8 @@ else
     exit 0
 fi
 
-echo "If statement catch-all."
-exit 0
+# echo "If statement catch-all."
+# exit 0
 
 ############################################
 ############################################
@@ -60,9 +71,10 @@ exit 0
 
 # These variables need to be declared again if breaking up the script
 APP_NAME="1Password"
-RELEASES_URL="https://releasebot.io/updates/1password/1password-mac"
-latest_version=$(curl -s $RELEASES_URL | grep -o "$APP_NAME for Mac [0-9.*]*" | head -n 1 | awk '{print $4}')
-if [[ -d "/Applications/$APP_NAME.app" ]]; then installed_version=$(/usr/bin/defaults read "/Applications/$APP_NAME.app/Contents/Info.plist" CFBundleShortVersionString); fi
+
+# Save logs to file
+LOG_FILE="/Library/Addigy/.addigy_installs.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
 
 # End of re-declaring variables
 #####
@@ -93,9 +105,20 @@ install () {
     rm -rf "/tmp/$APP_NAME"
 }
 
-# On the first run, the app will be downloaded before any
-# potential popup windows for end users.
-# This allows for immediate install after users click 'Update.'
+checkIfOpen(){
+    # Check if App is running
+    if pgrep -xq "$APP_NAME"; then
+        echo "$APP_NAME is open, exiting instead of installing update."
+        return 1 # No update alerts, letting Addigy do that.
+    else
+        echo "$APP_NAME is not open, continuing with install."
+        return 0
+    fi
+}
+
+# if ! checkIfOpen; then exit 0; fi
+
+# Only download if not cached
 if [[ ! -f "/tmp/$APP_NAME/$APP_NAME.pkg" ]]; then
     echo "Downloading $APP_NAME."
     download
@@ -103,14 +126,7 @@ else
     echo "$APP_NAME is already cached from a previous deferral."
 fi
 
-# Check if App is running
-if pgrep -xq "$APP_NAME"; then
-    echo "$APP_NAME is open, exiting instead of installing update."
-    exit 0 # No update alerts, letting Addigy do that.
-else
-    echo "$APP_NAME is not open and needs to be updated, continuing with install."
-    reopen_app="No"
-fi
+# if ! checkIfOpen; then exit 0; fi
 
 if install; then
     echo "Install was successful"
@@ -129,7 +145,6 @@ if [ -d "/Applications/$APP_NAME.app" ]; then
     echo "$APP_NAME has been installed to Applications."
     installed_version=$(/usr/bin/defaults read "/Applications/$APP_NAME.app/Contents/Info.plist" CFBundleShortVersionString)
     echo "Installed version $installed_version."
-    if [ $reopen_app == "Yes" ]; then open "/Applications/$APP_NAME.app"; fi
     exit 0
 else
     echo "An error occured installing $APP_NAME."
