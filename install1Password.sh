@@ -116,7 +116,7 @@ checkIfOpen(){
     fi
 }
 
-# if ! checkIfOpen; then exit 0; fi
+if ! checkIfOpen; then exit 0; fi
 
 # Only download if not cached
 if [[ ! -f "/tmp/$APP_NAME/$APP_NAME.pkg" ]]; then
@@ -126,7 +126,7 @@ else
     echo "$APP_NAME is already cached from a previous deferral."
 fi
 
-# if ! checkIfOpen; then exit 0; fi
+if ! checkIfOpen; then exit 0; fi
 
 if install; then
     echo "Install was successful"
