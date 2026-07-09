@@ -1,12 +1,23 @@
 #!/bin/bash
 
+# Save logs to file
+LOG_FILE="/Library/Addigy/.addigy_installs.log"
+
+# If over 1MB, delete the first 512KB of lines
+if [ -f "$LOG_FILE" ] && [ $(wc -c < "$LOG_FILE") -gt 1048576 ]; then
+    tail -c 524288 "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
+fi
+
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 ############################################
 ############################################
 # Use this part as the conditional script in Addigy
 # 'exit 1' = install app
 
 APP_NAME="Signal"
-echo "Starting 'Install $APP_NAME.'"
+echo ""
+echo "Starting 'Install $APP_NAME.' ($(date '+%Y-%m-%d %H:%M:%S'))"
 update_only="No"
 
 # Determine the latest version of the app
@@ -22,7 +33,7 @@ if [[ ! -d "/Applications/$APP_NAME.app" ]]; then
         exit 0
     fi
     echo "$APP_NAME is not installed. Installing..."
-    exit 1
+    # exit 1
 elif [ -z "$latest_version" ]; then
     # Cannot compare installed version with latest version
     echo "Error: Couldn't determine the latest $APP_NAME version."
@@ -37,7 +48,7 @@ elif [[ "$latest_version" != "$installed_version" ]]; then
         # An update is needed
         echo "Installed version: $installed_version."
         echo "Updating to $latest_version..."
-        exit 1
+        # exit 1
     else
         # $latest_version is LOWER than $installed_version
         echo "Error: the installed version is greater than the latest version."
@@ -51,8 +62,8 @@ else
     exit 0
 fi
 
-echo "If statement catch-all."
-exit 0
+# echo "If statement catch-all."
+# exit 0
 
 ############################################
 ############################################
@@ -60,6 +71,28 @@ exit 0
 
 # These variables need to be declared again if breaking up the script
 APP_NAME="Signal"
+
+# Save logs to file
+LOG_FILE="/Library/Addigy/.addigy_installs.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+# Prevent concurrent run
+LOCK_FILE="/tmp/${APP_NAME}_install.lock"
+if [ -f "$LOCK_FILE" ]; then
+    existing_pid=$(cat "$LOCK_FILE")
+    if kill -0 "$existing_pid" 2>/dev/null; then
+        echo "Another instance of this script is already running (PID $existing_pid). Exiting."
+        exit 0
+    else
+        echo "Stale lock file found. Removing and continuing."
+        rm -f "$LOCK_FILE"
+    fi
+else
+    echo "Not running concurrently"
+fi
+echo $$ > "$LOCK_FILE"
+trap 'rm -f "$LOCK_FILE"' EXIT
+
 RELEASES_URL="https://updates.signal.org/desktop/latest-mac.yml"
 latest_version=$(curl -s $RELEASES_URL | grep -o "version: .*" | cut -d " " -f 2)
 download_url="https://updates.signal.org/desktop/signal-desktop-mac-universal-$latest_version.dmg"
@@ -72,7 +105,7 @@ swiftInstalled() {
     # Check if Swift Dialog is installed
     if [ ! -f "/usr/local/bin/dialog" ]; then
         echo "Swift Dialog not installed"
-        exit 1
+        return 1
     else
         echo "Swift Dialog installed"
     fi
@@ -102,9 +135,12 @@ zoom () {
 
 popUpWindow() {
     # Download custom icon
-    ICON_URL="https://personified.tech/wp-content/themes/personified/images/favicons/apple-touch-icon.png"
+    ICON_URL="YourIconHere"
     ICON_PATH="/tmp/Update_icon.png"
     curl -s -L -o "$ICON_PATH" "$ICON_URL"
+
+    set +euo pipefail # Disable 'strict mode' so Addigy won't erroneously exit
+    # if an option other than Button 1 is used.
 
     # Show Swift Dialog alert with macOS-native styling
     /usr/local/bin/dialog \
@@ -114,7 +150,7 @@ popUpWindow() {
         --iconsize 128 \
         --button1text "Update Now" \
         --button2text "Later" \
-        --timer 180 \
+        --timer 60 \
         --hidetimerbar \
         --defaultbutton 1 \
         --width 500 --height 220 \
@@ -132,13 +168,14 @@ popUpWindow() {
         if pgrep -xq "$APP_NAME"; then killall "$APP_NAME"; fi
         echo "Continuing with install..."
         sleep 2
+        return 0
     elif [[ "$exitCode" == "4" ]]; then
         # User let the timer run out
         echo "The timer ran out, deferring install."
-        exit 0
+        return 1
     else
         echo "$APP_NAME update was deferred."
-        exit 0
+        return 1
     fi
 }
 
@@ -152,20 +189,38 @@ download () {
 }
 
 install () {
-    # Mount the DMG and get the mount point
-    mount_point=$(hdiutil attach "/tmp/$APP_NAME/$APP_NAME.dmg" | grep -o "/Volumes/$APP_NAME.*")
-    if [[ -z "$mount_point" ]]; then
-        echo "Error: didn't mount the DMG."
+    mount_point=$(hdiutil attach -nobrowse "/tmp/$APP_NAME/$APP_NAME.dmg" | grep -o "/Volumes/$APP_NAME.*")
+
+    # Rename existing app as backup
+    if [[ -d "/Applications/$APP_NAME.app" ]]; then
+        mv "/Applications/$APP_NAME.app" "/Applications/$APP_NAME.app.bak"
+        backup=true
+    fi
+
+    # Copy new version
+    sudo cp -Rf "$mount_point/$APP_NAME.app" /Applications/
+
+    if [[ $? -ne 0 ]]; then
+        echo "Install failed, restoring previous version..."
+        rm -rf "/Applications/$APP_NAME.app"
+        mv "/Applications/$APP_NAME.app.bak" "/Applications/$APP_NAME.app"
+        hdiutil detach "$mount_point"
         return 1
     fi
 
-    # Copy app to the Applications folder
-    cp -Rf "$mount_point/$APP_NAME.app" /Applications/ 2>/dev/null
+    # Verify the new bundle is valid before committing
+    if ! codesign --verify "/Applications/$APP_NAME.app" 2>/dev/null; then
+        echo "Code signature invalid, restoring previous version..."
+        rm -rf "/Applications/$APP_NAME.app"
+        if $had_existing; then mv "/Applications/$APP_NAME.app.bak" "/Applications/$APP_NAME.app"; fi
+        hdiutil detach "$mount_point"
+        return 1
+    fi
 
-    # Clean up
+    # New version confirmed good, remove backup
+    if $had_existing; then rm -rf "/Applications/$APP_NAME.app.bak"; fi
     hdiutil detach "$mount_point"
-    if [[ -d "/tmp/$APP_NAME" ]]; then rm -rf "/tmp/$APP_NAME"; fi
-    return 0
+    rm -rf "/tmp/$APP_NAME"
 }
 
 # On the first run, the app will be downloaded before any
@@ -184,10 +239,10 @@ if pgrep -xq "$APP_NAME"; then
     if ! zoom; then exit 0; fi # Check if Zoom is running
     echo "$APP_NAME is open, asking to install."
     if ! swiftInstalled; then exit 0; fi # Check if Swift Dialog is installed
-    popUpWindow
+    if ! popUpWindow; then exit 0; fi # Ask user for permission to update
     reopen_app="Yes"
 else
-    echo "$APP_NAME is not open and needs to be updated, continuing with install..."
+    echo "$APP_NAME is not open, continuing with install..."
     reopen_app="No"
 fi
 
@@ -200,14 +255,15 @@ else
     install
     if [[ $? -ne 0 ]]; then
         echo "Install failed a second time"
+        if [[ -d "/tmp/$APP_NAME" ]]; then rm -rf "/tmp/$APP_NAME"; fi
         exit 1
     fi
 fi
 
 if [ -d "/Applications/$APP_NAME.app" ]; then
     echo "$APP_NAME has been installed to Applications."
-    installed_verison=$(/usr/bin/defaults read "/Applications/$APP_NAME.app/Contents/Info.plist" CFBundleShortVersionString)
-    echo "Installed version $installed_verison."
+    installed_version=$(/usr/bin/defaults read "/Applications/$APP_NAME.app/Contents/Info.plist" CFBundleShortVersionString)
+    echo "Installed version $installed_version."
     if [ $reopen_app == "Yes" ]; then open "/Applications/$APP_NAME.app"; fi
     exit 0
 else
