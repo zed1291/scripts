@@ -33,7 +33,7 @@ if [[ ! -d "/Applications/$APP_NAME.app" ]]; then
         exit 0
     fi
     echo "$APP_NAME is not installed. Installing..."
-    # exit 1
+    exit 1
 elif [ -z "$latest_version" ]; then
     # Cannot compare installed version with latest version
     echo "Error: Couldn't determine the latest $APP_NAME version."
@@ -48,7 +48,7 @@ elif [[ "$latest_version" != "$installed_version" ]]; then
         # An update is needed
         echo "Installed version: $installed_version."
         echo "Updating to $latest_version..."
-        # exit 1
+        exit 1
     else
         # $latest_version is LOWER than $installed_version
         echo "Error: the installed version is greater than the latest version."
@@ -62,8 +62,8 @@ else
     exit 0
 fi
 
-# echo "If statement catch-all."
-# exit 0
+echo "If statement catch-all."
+exit 0
 
 ############################################
 ############################################
