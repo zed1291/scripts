@@ -165,4 +165,42 @@ if ! checkIfOpen; then exit 0; fi
 # Only re-download if not cached already
 if [[ ! -f "/tmp/$APP_NAME/$APP_NAME.pkg" ]]; then
     echo "Downloading $APP_NAME."
-    
+    download
+else
+    echo "$APP_NAME was cached from a previous deferral."
+fi
+
+if ! checkIfOpen; then exit 0; fi
+
+if install; then
+    echo "Install was successful"
+else
+    # remove cached download and retry
+    if [[ -d "/tmp/$APP_NAME" ]]; then rm -rf "/tmp/$APP_NAME"; fi
+    download
+    install
+    if [[ $? -ne 0 ]]; then
+        echo "Install failed a second time"
+        if [[ -d "/tmp/$APP_NAME" ]]; then rm -rf "/tmp/$APP_NAME"; fi
+        exit 1
+    fi
+fi
+
+# Check if installed in either location
+app_found=false
+for app_path in "${APP_PATHS[@]}"; do
+    if [ -d "$app_path" ]; then
+        echo "$APP_NAME has been installed to $app_path."
+        installed_version=$(/usr/bin/defaults read "$app_path/Contents/Info.plist" CFBundleShortVersionString)
+        echo "Version $installed_version."
+        app_found=true
+        break
+    fi
+done
+
+if [ "$app_found" = true ]; then
+    exit 0
+else
+    echo "An error occured installing $APP_NAME."
+    exit 1
+fi
