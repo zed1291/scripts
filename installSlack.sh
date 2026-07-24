@@ -8,8 +8,8 @@
 APP_NAME="Slack"
 
 # Get the console user home directory
-CONSOLE_USER=$(stat -f%Su /dev/console 2>/dev/null || echo "$LOGNAME")
-APP_PATHS=("/Applications/$APP_NAME.app" "/Users/$CONSOLE_USER/Applications/$APP_NAME.app")
+logged_in_user=$(stat -f%Su /dev/console 2>/dev/null || echo "$LOGNAME")
+APP_PATHS=("/Applications/$APP_NAME.app" "/Users/$logged_in_user/Applications/$APP_NAME.app")
 
 # Save logs to file
 LOG_FILE="/Library/Addigy/.addigy_installs.log"
@@ -104,8 +104,8 @@ APP_NAME="Slack"
 DOWNLOAD_URL="https://slack.com/api/desktop.latestRelease?redirect=1&variant=pkg&arch=universal"
 
 # Get the console user home directory
-CONSOLE_USER=$(stat -f%Su /dev/console 2>/dev/null || echo "$LOGNAME")
-APP_PATHS=("/Applications/$APP_NAME.app" "/Users/$CONSOLE_USER/Applications/$APP_NAME.app")
+logged_in_user=$(stat -f%Su /dev/console 2>/dev/null || echo "$LOGNAME")
+APP_PATHS=("/Applications/$APP_NAME.app" "/Users/$logged_in_user/Applications/$APP_NAME.app")
 
 # End of re-declaring variables
 #####
@@ -178,4 +178,34 @@ fi
 if ! checkIfOpen; then exit 0; fi
 
 if install; then
-    echo "Install was succes
+    echo "Install was successful"
+else
+    # remove cached download and retry
+    if [[ -d "/tmp/$APP_NAME" ]]; then rm -rf "/tmp/$APP_NAME"; fi
+    download
+    install
+    if [[ $? -ne 0 ]]; then
+        echo "Install failed a second time"
+        if [[ -d "/tmp/$APP_NAME" ]]; then rm -rf "/tmp/$APP_NAME"; fi
+        exit 1
+    fi
+fi
+
+# Check if installed in either location
+app_found=false
+for app_path in "${APP_PATHS[@]}"; do
+    if [ -d "$app_path" ]; then
+        echo "$APP_NAME has been installed to $app_path."
+        installed_version=$(/usr/bin/defaults read "$app_path/Contents/Info.plist" CFBundleShortVersionString)
+        echo "Version $installed_version."
+        app_found=true
+        break
+    fi
+done
+
+if [ "$app_found" = true ]; then
+    exit 0
+else
+    echo "An error occured installing $APP_NAME."
+    exit 1
+fi
